@@ -4,3 +4,4 @@ uvicorn
 fastapi
 pydantic
 setuptools
+opencv-python
