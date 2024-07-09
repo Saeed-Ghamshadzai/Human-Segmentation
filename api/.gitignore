@@ -122,3 +122,7 @@ target/
 # OS-specific files
 .DS_Store
 Thumbs.db
+
+# Git related files
+.gitignore
+api/.gitignore
