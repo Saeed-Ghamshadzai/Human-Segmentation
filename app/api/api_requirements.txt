@@ -5,3 +5,4 @@ fastapi
 pydantic
 setuptools
 opencv-python
+moviepy
