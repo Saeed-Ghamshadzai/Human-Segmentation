@@ -8,3 +8,4 @@ services:
     command: sh -c "uvicorn api.main:app --port 8080 --host 0.0.0.0"
     ports:
       - 8000:8080
+      
