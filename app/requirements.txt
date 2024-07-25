@@ -1,0 +1,8 @@
+numpy
+pandas
+uvicorn
+fastapi
+pydantic
+setuptools
+opencv-python
+moviepy
