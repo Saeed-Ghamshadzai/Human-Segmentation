@@ -1,7 +1,7 @@
 from fastapi import FastAPI, UploadFile, Form, HTTPException
 from fastapi.responses import JSONResponse, HTMLResponse, StreamingResponse
 from moviepy.editor import VideoFileClip, AudioFileClip
-from api.webcam import VideoCamera
+from api.webcam import WebcamCapture
 from api.segmentor.data import PreprocessImage
 from api.segmentor.model import load_model, predict
 from api.segmentor.utils import InvTransform, apply_mask_overlay
@@ -18,13 +18,13 @@ import urllib.parse
 
 app = FastAPI()
 
-# camera = VideoCamera()
+camera = WebcamCapture()
 
 processor = PreprocessImage()
 inv_transform = InvTransform()
 
 # Path to the saved model weights
-weights_path = "app\\api\\segmentor\\DeepLabV3-Model.pth.tar"
+weights_path = "app\\api\\segmentor\\DeepLabV3-Model-V1.1.pth.tar"
 
 # Initialize the device (GPU if available, otherwise CPU)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -46,7 +46,7 @@ def segment_image(image_array):
     mask = predict(model, image_array, device) * 255
 
     return mask
-import matplotlib.pyplot as plt
+    
 def segment_video(video_path):
     # Extract video directory, name, and extension
     video_dir, video_name = os.path.split(video_path)
@@ -294,45 +294,56 @@ async def video_player(video_name: str):
     return HTMLResponse(content=html_content)
 
 # Webcam segmentation endpoint
-# def generate_webcam_feed():
-#     while True:
-#         frame = camera.get_frame()
-#         yield (b'--frame\r\n'
-#                b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+@app.get("/start-webcam")
+def start_webcam():
+    """Starts the webcam."""
+    camera.start()
+    return {"status": "Webcam started"}
 
-# def generate_segmented_webcam_feed():
-#     while True:
-#         frame = camera.get_segmented_frame()
-#         yield (b'--frame\r\n'
-#                b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+@app.get("/stop-webcam")
+def stop_webcam():
+    """Stops the webcam."""
+    camera.stop()
+    return {"status": "Webcam stopped"}
 
-# @app.get("/webcam-feed/")
-# async def webcam_feed():
-#     return StreamingResponse(generate_webcam_feed(), media_type='multipart/x-mixed-replace; boundary=frame')
+@app.get("/webcam-feed", response_class=HTMLResponse)
+def webcam_feed():
+    """Displays the original, segmented, and overlayed frames in a single row."""
+    camera.start()
 
-# @app.get("/segmented-webcam-feed/")
-# async def segmented_webcam_feed():
-#     return StreamingResponse(generate_segmented_webcam_feed(), media_type='multipart/x-mixed-replace; boundary=frame')
+    # Capture the frames as base64 strings
+    original_base64, segmented_base64, overlayed_base64 = camera.get_frames_base64()
 
-# @app.get("/webcam-player/", response_class=HTMLResponse)
-# async def webcam_player():
-#     html_content = """
-#     <!DOCTYPE html>
-#     <html>
-#     <body>
-#     <h1>Webcam Feeds</h1>
-    
-#     <h2>Original Webcam Feed</h2>
-#     <img id="original" src="/webcam-feed/" style="width: 640px; height: 480px;">
-    
-#     <h2>Segmented Webcam Feed</h2>
-#     <img id="segmented" src="/segmented-webcam-feed/" style="width: 640px; height: 480px;">
-    
-#     </body>
-#     </html>
-#     """
-#     return HTMLResponse(content=html_content)
+    # Construct the HTML page
+    html_content = f"""
+    <html>
+    <body>
+    <h1>Webcam Feed</h1>
+    <div style="display: flex; justify-content: space-between;">
+        <div style="margin-right: 10px;">
+            <h2>Original Frame</h2>
+            <img src="data:image/jpeg;base64,{image_to_base64(original_base64)}" alt="Original Frame">
+        </div>
+        <div style="margin-right: 10px;">
+            <h2>Segmented Frame</h2>
+            <img src="data:image/jpeg;base64,{image_to_base64(segmented_base64)}" alt="Segmented Frame">
+        </div>
+        <div style="margin-right: 10px;">
+            <h2>Overlayed Frame</h2>
+            <img src="data:image/jpeg;base64,{image_to_base64(overlayed_base64)}" alt="Overlayed Frame">
+        </div>
+    </div>
+    <script>
+        setTimeout(function() {{
+            window.location.reload(1);
+        }}, 200);  // Refresh the page every 200 milliseconds to update frames
+    </script>
+    </body>
+    </html>
+    """
+    return HTMLResponse(content=html_content)
 
-# @app.on_event("shutdown")
-# def shutdown_event():
-#     camera.stop()
+@app.on_event("shutdown")
+def shutdown_event():
+    """Ensure webcam is stopped when the application shuts down."""
+    camera.stop()

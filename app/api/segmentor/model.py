@@ -76,7 +76,7 @@ def predict(model, image_tensor, device, threshold=0.5):
 # Example usage
 if __name__ == "__main__":
     # Path to the saved model weights
-    weights_path = "app\\api\\segmentor\\DeepLabV3-Model.pth.tar"
+    weights_path = "app\\api\\segmentor\\DeepLabV3-Model-V1.0.pth.tar"
     
     # Initialize the device (GPU if available, otherwise CPU)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
