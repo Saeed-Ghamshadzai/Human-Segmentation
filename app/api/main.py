@@ -1,35 +1,29 @@
-from fastapi import FastAPI, UploadFile, Form, HTTPException
+from fastapi import FastAPI, UploadFile, Form, HTTPException, Query, Response, Header
 from fastapi.responses import JSONResponse, HTMLResponse, StreamingResponse
-from moviepy.editor import VideoFileClip, AudioFileClip
 from api.webcam import WebcamCapture
-from api.segmentor.data import PreprocessImage
-from api.segmentor.model import load_model, predict
-from api.segmentor.utils import InvTransform, apply_mask_overlay
+from model_pytorch.model import load_model
+from data_pytorch.preprocessor import PreprocessImage
+from utils.utils import apply_mask_overlay, segment_image, segment_video, image_to_base64, InvTransform
 import requests
 import torch
 import cv2
 import re
 import os
-import tqdm
-import base64
-from io import BytesIO
-import numpy as np
 import urllib.parse
 
 app = FastAPI()
-
-camera = WebcamCapture()
-
 processor = PreprocessImage()
 inv_transform = InvTransform()
 
 # Path to the saved model weights
-weights_path = "app\\api\\segmentor\\DeepLabV3-Model-V1.1.pth.tar"
+weights_path = "app\\model_pytorch\\DeepLabV3-Model-V1.1.pth.tar"
 
 # Initialize the device (GPU if available, otherwise CPU)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 model = load_model(weights_path, device)
+
+camera = WebcamCapture(model=model, device=device)
 
 user_upload_dir = os.path.join('app', 'api', 'uploads_dir')
 os.makedirs(user_upload_dir, exist_ok=True)
@@ -37,52 +31,24 @@ os.makedirs(user_upload_dir, exist_ok=True)
 test_images = ["C:\\Users\ZBook Studio\Pictures\\Jowhareh_galleries_3_poster_11e0fb75-eda7-4eb5-ab64-2636e5493170.jpeg",
             "C:\\Users\ZBook Studio\Pictures\\Jowhareh_galleries_3_poster_785fa3f4-e35d-429c-b021-89efe144fb38.jpeg"]
 
-def image_to_base64(image_array):
-    _, buffer = cv2.imencode('.jpg', image_array)
-    img_str = base64.b64encode(buffer).decode('utf-8')
-    return img_str
 
-def segment_image(image_array):
-    mask = predict(model, image_array, device) * 255
+from enum import Enum
 
-    return mask
+class ImageSize(str, Enum):
+    S64 = "64"
+    S128 = "128"
+    S256 = "256"
+    S512 = "512"
+    S720 = "720"
+    S1080 = "1080"
     
-def segment_video(video_path):
-    # Extract video directory, name, and extension
-    video_dir, video_name = os.path.split(video_path)
-    video_base, video_ext = os.path.splitext(video_name)
-    
-    # Load the video
-    video_clip = VideoFileClip(video_path)
-    
-    # Get video properties
-    fps = video_clip.fps
-    width, height = video_clip.size
-    audio_clip = video_clip.audio
+@app.on_event("startup")
+async def startup_event():
+    # global model
+    # Load your model here
+    # model = some_model_library.load_model('path_to_model')
+    print("Model loaded successfully")
 
-    # Define the output video path
-    segmented_video_path = os.path.join(video_dir, f"{video_base}_segmented{video_ext}")
-
-    # Process each frame to grayscale
-    def process_frame(frame):
-        processed_frame = processor(frame)
-        segmented_image = segment_image(processed_frame)
-
-        original_image = inv_transform(processed_frame.squeeze(0)).permute(1, 2, 0).numpy()
-        overlayed_image = apply_mask_overlay(original_image, segmented_image, format='RGB')
-
-        return overlayed_image
-    
-    # Apply the frame processing
-    processed_clip = video_clip.fl_image(process_frame)
-
-    # Write the processed video with the original audio
-    processed_clip = processed_clip.set_audio(audio_clip)
-    processed_clip.write_videofile(segmented_video_path, codec='libx264', fps=fps)
-
-    print(f"Processed video saved at: {segmented_video_path}")
-
-    return segmented_video_path
 
 # Health checker endpoint
 @app.get('/health_checker')
@@ -197,12 +163,15 @@ async def create_upload_file(file: UploadFile = Form(None), url: str = Form(None
         
 # View selected image endpoint
 @app.get("/view-image/{image_name}", response_class=HTMLResponse)
-async def view_image(image_name: str):
+async def view_image(
+    image_name: str,
+    size: ImageSize = Query(default=None, description="Size to resize the frames to (optional)")
+):
     decoded_image_name = urllib.parse.unquote_plus(image_name)
     image = cv2.imread(decoded_image_name)
 
     image = processor(image)
-    segmented_image = segment_image(image)
+    segmented_image = segment_image(model, image, device)
 
     original_image = inv_transform(image).squeeze(0).permute(1, 2, 0).numpy()
     overlayed_image = apply_mask_overlay(original_image, segmented_image)
@@ -256,8 +225,11 @@ async def view_video(video_name: str):
     return StreamingResponse(iterfile(), media_type="video/mp4")
 
 @app.get("/video-player/{video_name}", response_class=HTMLResponse)
-async def video_player(video_name: str):
-    segmented_video_name = segment_video(video_name)
+async def video_player(
+    video_name: str,
+    size: ImageSize = Query(default=None, description="Size to resize the frames to (optional)")
+    ):
+    segmented_video_name = segment_video(model, video_name, device)
     
     encoded_video_name = urllib.parse.quote_plus(video_name)
     encoded_segmented_video_name = urllib.parse.quote_plus(segmented_video_name)
@@ -307,7 +279,9 @@ def stop_webcam():
     return {"status": "Webcam stopped"}
 
 @app.get("/webcam-feed", response_class=HTMLResponse)
-def webcam_feed():
+def webcam_feed(
+    size: ImageSize = Query(default=None, description="Size to resize the frames to (optional)")
+):
     """Displays the original, segmented, and overlayed frames in a single row."""
     camera.start()
 
@@ -322,15 +296,15 @@ def webcam_feed():
     <div style="display: flex; justify-content: space-between;">
         <div style="margin-right: 10px;">
             <h2>Original Frame</h2>
-            <img src="data:image/jpeg;base64,{image_to_base64(original_base64)}" alt="Original Frame">
+            <img src="data:image/jpeg;base64,{original_base64}" alt="Original Frame">
         </div>
         <div style="margin-right: 10px;">
             <h2>Segmented Frame</h2>
-            <img src="data:image/jpeg;base64,{image_to_base64(segmented_base64)}" alt="Segmented Frame">
+            <img src="data:image/jpeg;base64,{segmented_base64}" alt="Segmented Frame">
         </div>
         <div style="margin-right: 10px;">
             <h2>Overlayed Frame</h2>
-            <img src="data:image/jpeg;base64,{image_to_base64(overlayed_base64)}" alt="Overlayed Frame">
+            <img src="data:image/jpeg;base64,{overlayed_base64}" alt="Overlayed Frame">
         </div>
     </div>
     <script>
@@ -347,3 +321,7 @@ def webcam_feed():
 def shutdown_event():
     """Ensure webcam is stopped when the application shuts down."""
     camera.stop()
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="127.0.0.1", port=8000)

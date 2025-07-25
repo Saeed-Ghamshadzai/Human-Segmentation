@@ -1,39 +1,26 @@
 import cv2
-from threading import Thread
-import time
-import numpy as np
-import base64
-from io import BytesIO
-from PIL import Image
-from api.segmentor.utils import InvTransform, apply_mask_overlay
-
-from api.segmentor.model import load_model, predict
-from api.segmentor.data import PreprocessImage
-
-import torch
-# Path to the saved model weights
-weights_path = "app\\api\\segmentor\\DeepLabV3-Model-V1.0.pth.tar"
-
-# Initialize the device (GPU if available, otherwise CPU)
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+from utils.utils import InvTransform, apply_mask_overlay, segment_image, image_to_base64
+from data_pytorch.preprocessor import PreprocessImage
 
 processor = PreprocessImage()
 inv_transform = InvTransform()
-model = load_model(weights_path, device)
 
 class WebcamCapture:
-    def __init__(self, width=256, height=256, backend=cv2.CAP_DSHOW):
+    def __init__(self, width=128, height=128, backend=cv2.CAP_DSHOW, model=None, device='cuda', preprocessor=PreprocessImage()):
         """
         Initializes the webcam capture object.
         :param width: Width of the capture frame.
         :param height: Height of the capture frame.
         :param backend: Backend used to open the webcam. Default is DirectShow.
         """
+        self.model = model
+        self.device = device
         self.width = width
         self.height = height
         self.backend = backend
         self.webcam = None
         self.is_started = False
+        self.preprocessor = [preprocessor]
 
     def start(self):
         """Starts the webcam capture."""
@@ -80,14 +67,14 @@ class WebcamCapture:
     def segment_frame(self, frame):
         """Segments the given frame. (Placeholder for actual segmentation logic)"""
         # Convert to grayscale as a placeholder for actual segmentation
-        processed_frame = processor(frame)
-        segmented_frame = predict(model, processed_frame, device) * 255
+        processed_frame = preprocessor(frame)
+        segmented_frame = segment_image(self.model, processed_frame, self.device)
         return segmented_frame
 
     def overlay_frame(self, frame, segmented_frame):
         """Overlays the segmented frame onto the original frame."""
         # Ensure segmented frame is 3-channel to overlay
-        processed_frame = processor(frame).squeeze(0)
+        processed_frame = preprocessor(frame).squeeze(0)
         inversed_transformation_image = inv_transform(processed_frame).permute(1, 2, 0).numpy()
 
         overlayed_frame = apply_mask_overlay(inversed_transformation_image, segmented_frame)
@@ -99,21 +86,10 @@ class WebcamCapture:
         overlayed_frame = self.get_overlayed_frame()
 
         return (
-            frame,
-            segmented_frame,
-            overlayed_frame
+            image_to_base64(frame),
+            image_to_base64(segmented_frame),
+            image_to_base64(overlayed_frame)
         )
-
-    def frame_to_base64(self, frame):
-        # Convert frame (numpy array) to PIL Image
-        # pil_img = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
-        pil_img = Image.fromarray(frame)
-        # Convert PIL Image to BytesIO
-        buffered = BytesIO()
-        pil_img.save(buffered, format="JPEG")
-        # Encode as base64
-        img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
-        return img_str
 
 # Example usage
 if __name__ == "__main__":

@@ -5,13 +5,16 @@ from torchvision import transforms
 
 # Define the necessary transformations
 class PreprocessImage:
-    def __init__(self, resize=(256, 256), mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)):
+    def __init__(self, resize=(128, 128), mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)):
+        self.width = resize[0]
+        self.height = resize[0]
+
         self.transform = transforms.Compose([
-            transforms.Resize(resize),          # Resize the image
+            transforms.Resize((self.width, self.height)),          # Resize the image
             transforms.ToTensor(),              # Convert the image to a tensor
             transforms.Normalize(mean, std)     # Normalize the image with mean and std
         ])
-
+        
     def __call__(self, image_array):
         """
         Preprocess the image array and convert it into a tensor suitable for model input.
