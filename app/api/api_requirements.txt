@@ -1,0 +1,11 @@
+C:\Users\ZBook Studio\Documents\AI\Deployment\Packages\torch-2.4.0+cu118-cp312-cp312-win_amd64.whl
+torchvision --index-url https://download.pytorch.org/whl/cu118
+
+numpy
+pandas
+uvicorn
+fastapi[standard]
+pydantic
+setuptools
+opencv-python
+moviepy
